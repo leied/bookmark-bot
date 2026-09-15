@@ -125,6 +125,46 @@ describe("color component", () => {
     }
   });
 
+  it("round-trips a DM bookmark's @me jump link through the palette", async () => {
+    const sign = await useSigningKey();
+    const dmMessage = {
+      ...bookmarkMessage,
+      components: [
+        {
+          type: ComponentType.ActionRow,
+          components: [
+            { type: ComponentType.Button, style: ButtonStyle.Secondary, custom_id: "color" },
+            { type: ComponentType.Button, style: ButtonStyle.Secondary, custom_id: "delete" },
+            {
+              type: ComponentType.Button,
+              style: ButtonStyle.Link,
+              url: "https://discord.com/channels/@me/222/333",
+            },
+          ],
+        },
+      ],
+    };
+
+    // Opening the palette must carry the @me path into each custom_id...
+    const picker = (await (
+      await dispatch(
+        await sign({ ...componentInteraction("color"), message: dmMessage }),
+      )
+    ).json()) as any;
+    const chosen = picker.data.components[0].components[0].custom_id;
+    expect(chosen).toBe("color:5793266:@me/222/333");
+
+    // ...and picking a colour must rebuild the same link, not a broken one.
+    const applied = (await (
+      await dispatch(
+        await sign({ ...componentInteraction(chosen), message: dmMessage }),
+      )
+    ).json()) as any;
+    expect(applied.data.components[0].components[2].url).toBe(
+      "https://discord.com/channels/@me/222/333",
+    );
+  });
+
   it("recolours every embed and restores the default buttons", async () => {
     const sign = await useSigningKey();
     const interaction = componentInteraction("color:15548997:1/2/3");
