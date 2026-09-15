@@ -65,6 +65,20 @@ function bookmarkInteraction(overrides: Record<string, unknown> = {}, message: u
   };
 }
 
+/** Mirrors Discord's 6000 character budget calculation, independently of src/. */
+function totalLength(embeds: any[]): number {
+  return embeds.reduce(
+    (sum, e) =>
+      sum +
+      (e.title?.length ?? 0) +
+      (e.description?.length ?? 0) +
+      (e.footer?.text.length ?? 0) +
+      (e.author?.name.length ?? 0) +
+      (e.fields ?? []).reduce((f: number, x: any) => f + x.name.length + x.value.length, 0),
+    0,
+  );
+}
+
 async function dispatch(request: Request) {
   const ctx = createExecutionContext();
   const response = await worker.fetch(request, env, ctx);
@@ -159,6 +173,45 @@ describe("/Bookmark", () => {
 
     expect(sent[SEND_DM].embeds).toHaveLength(1);
     expect(sent[SEND_DM].embeds[0].author.name).toBe("author (7)");
+  });
+
+  it("gives a migrated author (discriminator 0) a real default avatar", async () => {
+    const sign = await useSigningKey();
+    env.DISCORD_TOKEN = "test-token";
+    const sent = mockDiscord(happyPathRoutes());
+
+    const message = {
+      ...MESSAGE,
+      author: { id: "80351110224678912", username: "author", discriminator: "0", avatar: null },
+    };
+    await dispatch(await sign(bookmarkInteraction({}, message)));
+
+    // Not avatars/0.png, which is what discriminator % 5 produced for every
+    // account on the new username system.
+    expect(sent[SEND_DM].embeds[0].author.icon_url).toBe(
+      "https://cdn.discordapp.com/embed/avatars/5.png",
+    );
+  });
+
+  it("keeps a heavy message within Discord's per-message embed limits", async () => {
+    const sign = await useSigningKey();
+    env.DISCORD_TOKEN = "test-token";
+    const sent = mockDiscord(happyPathRoutes());
+
+    // Twelve rich embeds of 1000 characters each: every embed is individually
+    // legal, but the set is over both the 10 embed cap and the 6000 budget.
+    const message = {
+      ...MESSAGE,
+      content: "",
+      embeds: Array.from({ length: 12 }, () => ({ type: "rich", description: "x".repeat(1000) })),
+    };
+    await dispatch(await sign(bookmarkInteraction({}, message)));
+
+    const embeds = sent[SEND_DM].embeds;
+    expect(embeds.length).toBeLessThanOrEqual(10);
+    expect(totalLength(embeds)).toBeLessThanOrEqual(6000);
+    // The attribution embed survives the trim.
+    expect(embeds[0].author.name).toBe("author (7)");
   });
 
   it("tells the user to open their DMs when Discord returns 403", async () => {

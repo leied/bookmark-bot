@@ -56,7 +56,8 @@ export class CommandInput {
     this.resolved = "resolved" in data ? (data.resolved as ResolvedData) : undefined;
     this.targetId = "target_id" in data ? data.target_id : undefined;
     this.guildId = interaction.guild_id;
-    this.channelId = interaction.channel?.id;
+    // `channel` is the modern field; `channel_id` is kept as a fallback.
+    this.channelId = interaction.channel?.id ?? interaction.channel_id;
     this.user = interaction.user;
     this.member = interaction.member;
   }

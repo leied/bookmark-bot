@@ -32,7 +32,8 @@ export class ComponentInput {
     this.componentType = data.component_type;
     this.values = "values" in data && data.values ? [...data.values] : [];
     this.guildId = interaction.guild_id;
-    this.channelId = interaction.channel?.id;
+    // `channel` is the modern field; `channel_id` is kept as a fallback.
+    this.channelId = interaction.channel?.id ?? interaction.channel_id;
     this.member = interaction.member;
     this.message = interaction.message;
   }

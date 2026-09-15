@@ -13,7 +13,7 @@ import {
 } from "discord-api-types/v10";
 
 import type { Command, CommandInput } from "../command.js";
-import { isValidEmbed } from "../embed.js";
+import { EMBED_LIMITS, embedLength, fitToMessage, isValidEmbed, totalEmbedLength } from "../embed.js";
 
 /** Wraps bare links in markdown so they render as links inside an embed. */
 export function replaceLinksWithMarkdown(text: string): string {
@@ -30,12 +30,28 @@ function ephemeral(content: string): APIInteractionResponseCallbackData {
   return { content, flags: MessageFlags.Ephemeral };
 }
 
+/**
+ * Discord's default-avatar index: `(id >> 22) % 6` for accounts on the new
+ * username system (discriminator "0"), `discriminator % 5` for legacy ones.
+ * The shift has to happen in BigInt because snowflakes exceed 2^53.
+ */
+export function defaultAvatarIndex(id: string, discriminator: string | undefined): number {
+  const legacy = Number.parseInt(discriminator ?? "0", 10);
+  if (Number.isFinite(legacy) && legacy > 0) return legacy % 5;
+
+  try {
+    return Number((BigInt(id) >> 22n) % 6n);
+  } catch {
+    return 0;
+  }
+}
+
 function authorAvatarUrl(author: APIMessage["author"]): string {
   if (author.avatar) {
     return `https://cdn.discordapp.com/avatars/${author.id}/${author.avatar}.png`;
   }
-  const index = Number.parseInt(author.discriminator, 10) % 5;
-  return `https://cdn.discordapp.com/embed/avatars/${Number.isNaN(index) ? 0 : index}.png`;
+  const index = defaultAvatarIndex(author.id, author.discriminator);
+  return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
 }
 
 function guildIconUrl(guild: APIGuild): string {
@@ -54,9 +70,20 @@ function stickerUrl(sticker: APIStickerItem): string {
   return `https://media.discordapp.net/stickers/${sticker.id}.${extension}`;
 }
 
-/** True if `addition` can be appended to the embed's description within limits. */
-function canAdd(embed: APIEmbed, addition: string): boolean {
-  return isValidEmbed({ ...embed, description: (embed.description ?? "") + addition });
+/**
+ * True if `addition` can be appended to the embed at `index` without breaking
+ * that embed's own limits *or* the 6000 character budget shared by every embed
+ * on the message.
+ */
+function canAdd(embeds: APIEmbed[], index: number, addition: string): boolean {
+  const candidate = embeds[index];
+  if (!candidate) return false;
+
+  const grown = { ...candidate, description: (candidate.description ?? "") + addition };
+  if (!isValidEmbed(grown)) return false;
+
+  const total = totalEmbedLength(embeds) - embedLength(candidate) + embedLength(grown);
+  return total <= EMBED_LIMITS.total;
 }
 
 function appendAttachments(embeds: APIEmbed[], attachments: APIAttachment[]): void {
@@ -66,13 +93,12 @@ function appendAttachments(embeds: APIEmbed[], attachments: APIAttachment[]): vo
   const list = attachments.map((a) => `[${a.filename}](${a.url})`).join("\n> ");
   const description = `\n**Attachments:**\n> ${list}`;
 
-  const first = embeds[0]!;
-  const last = embeds[embeds.length - 1]!;
+  const lastIndex = embeds.length - 1;
 
-  if (canAdd(first, description)) {
-    first.description = (first.description ?? "") + description;
-  } else if (canAdd(last, description)) {
-    last.description = (last.description ?? "") + description;
+  if (canAdd(embeds, 0, description)) {
+    embeds[0]!.description = (embeds[0]!.description ?? "") + description;
+  } else if (canAdd(embeds, lastIndex, description)) {
+    embeds[lastIndex]!.description = (embeds[lastIndex]!.description ?? "") + description;
   } else {
     embeds.push({ description });
   }
@@ -121,7 +147,8 @@ function buildEmbeds(message: APIMessage, guild: APIGuild): APIEmbed[] {
     icon_url: guildIconUrl(guild),
   };
 
-  return embeds;
+  // Attribution counts against the budget too, so fit only once it is on.
+  return fitToMessage(embeds);
 }
 
 export const bookmark: Command = {
