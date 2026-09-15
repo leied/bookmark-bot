@@ -167,6 +167,18 @@ describe("color component", () => {
     );
   });
 
+  it("uses only emoji any deployment can render", async () => {
+    const sign = await useSigningKey();
+    const body = (await (await dispatch(await sign(componentInteraction("color")))).json()) as any;
+
+    // A custom emoji id here means the emoji belongs to someone else's server;
+    // Discord rejects the response and the interaction appears to time out.
+    for (const button of body.data.components[0].components) {
+      expect(button.emoji.id).toBeUndefined();
+      expect(button.emoji.name).toMatch(/\p{Extended_Pictographic}/u);
+    }
+  });
+
   it("recolours every embed and restores the default buttons", async () => {
     const sign = await useSigningKey();
     const interaction = componentInteraction("color:15548997:1/2/3");

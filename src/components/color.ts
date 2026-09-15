@@ -11,13 +11,22 @@ import { InteractionFailed } from "../errors.js";
 
 const JUMP_URL_PREFIX = "https://discord.com/channels/";
 
-/** The palette offered by the 🎨 button: decimal colour + its custom emoji. */
+/**
+ * The palette offered by the 🎨 button: Discord colour + the swatch shown on
+ * its button.
+ *
+ * These are deliberately Unicode emoji. The original implementation used
+ * custom emoji (bk_blurple, bk_red, ...) owned by the upstream Bookmarker
+ * app's server; any other deployment of this bot cannot use them, and Discord
+ * rejects an interaction response carrying an inaccessible emoji — which the
+ * client reports as "didn't respond in time".
+ */
 const PALETTE = [
-  { color: 5793266, emoji: { id: "1086977694312439869", name: "bk_blurple" } },
-  { color: 15548997, emoji: { id: "1086977702386466867", name: "bk_red" } },
-  { color: 5763719, emoji: { id: "1086977699488223384", name: "bk_green" } },
-  { color: 16705372, emoji: { id: "1086977704194216066", name: "bk_yellow" } },
-  { color: 15418782, emoji: { id: "1086977696216645657", name: "bk_fucahsia" } },
+  { color: 5793266, emoji: "🟦" }, // blurple
+  { color: 15548997, emoji: "🟥" }, // red
+  { color: 5763719, emoji: "🟩" }, // green
+  { color: 16705372, emoji: "🟨" }, // yellow
+  { color: 15418782, emoji: "🟪" }, // fuchsia
 ] as const;
 
 /**
@@ -81,7 +90,7 @@ export const color: Component = {
               type: ComponentType.Button as const,
               style: ButtonStyle.Secondary as const,
               custom_id: `color:${value}:${jumpPath}`,
-              emoji: { id: emoji.id, name: emoji.name, animated: false },
+              emoji: { name: emoji },
               disabled: false,
             })),
           },
