@@ -8,6 +8,8 @@ import {
 } from "discord-api-types/v10";
 
 import worker from "../src/index.js";
+import { toRegisteredCommand } from "../src/command.js";
+import { commands } from "../src/commands/index.js";
 import { useSigningKey } from "./helpers.js";
 
 async function dispatch(request: Request) {
@@ -213,29 +215,24 @@ describe("delete component", () => {
   });
 });
 
-describe("/register", () => {
-  it("bulk-registers both commands with Discord", async () => {
-    env.DISCORD_TOKEN = "test-token";
-    env.DISCORD_APPLICATION_ID = "123456789";
-    delete (env as any).REGISTER_SECRET;
-
-    let payload: any;
-    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
-      payload = JSON.parse(String(init?.body));
-      return Response.json([], { status: 200 });
-    });
-
+describe("command registration", () => {
+  it("is not exposed as a public endpoint", async () => {
+    // Registration spends the bot token, so it must not be reachable by
+    // anyone on the internet; it runs from a developer machine instead.
     const response = await dispatch(
       new Request("https://bot.example.com/register", { method: "POST" }),
     );
 
-    expect(response.status).toBe(200);
-    expect(payload.map((c: any) => c.name)).toEqual(["help", "Bookmark"]);
+    expect(response.status).toBe(404);
+  });
+
+  it("declares the contexts a command may be used in", async () => {
+    const payload = commands.map(toRegisteredCommand);
+
+    expect(payload.map((c) => c.name)).toEqual(["help", "Bookmark"]);
     // Discord rejects a description on context-menu commands.
-    expect(payload.find((c: any) => c.name === "Bookmark").description).toBe("");
-    expect(payload.find((c: any) => c.name === "help").description).toBe(
-      "Information about the bot",
-    );
+    expect(payload.find((c) => c.name === "Bookmark")!.description).toBe("");
+    expect(payload.find((c) => c.name === "help")!.description).toBe("Information about the bot");
 
     // Without these, commands inherit the app's configured contexts and are
     // not offered in DMs. PrivateChannel (2) additionally needs UserInstall (1).
@@ -243,27 +240,5 @@ describe("/register", () => {
       expect(command.contexts).toEqual([0, 1, 2]);
       expect(command.integration_types).toEqual([0, 1]);
     }
-    vi.unstubAllGlobals();
-  });
-
-  it("requires the bearer token when REGISTER_SECRET is set", async () => {
-    env.REGISTER_SECRET = "s3cret";
-
-    const unauthorized = await dispatch(
-      new Request("https://bot.example.com/register", { method: "POST" }),
-    );
-    expect(unauthorized.status).toBe(401);
-
-    vi.stubGlobal("fetch", async () => Response.json([], { status: 200 }));
-    const authorized = await dispatch(
-      new Request("https://bot.example.com/register", {
-        method: "POST",
-        headers: { Authorization: "Bearer s3cret" },
-      }),
-    );
-    expect(authorized.status).toBe(200);
-
-    vi.unstubAllGlobals();
-    delete (env as any).REGISTER_SECRET;
   });
 });

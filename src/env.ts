@@ -17,8 +17,6 @@ declare global {
       DISCORD_PUBLIC_KEY: string;
       /** Application (client) id. */
       DISCORD_APPLICATION_ID: string;
-      /** Optional shared secret required by POST /register. */
-      REGISTER_SECRET?: string;
     }
   }
 }

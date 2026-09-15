@@ -67,17 +67,20 @@ Workers Builds watches the repo and deploys on every push. Set it up once:
 5. **Enable user installs.** On the application's **Installation** page, tick
    **User Install** under *Installation Contexts*. Commands are registered for
    `PRIVATE_CHANNEL` — DMs with other people — and Discord only allows that
-   context for user-installed apps, so `/register` in the next step fails
+   context for user-installed apps, so registration in the next step fails
    without it.
 
 6. **Register the commands.** Needed after the first deploy, and after any
    change to a command's name, description, options, or contexts:
 
    ```bash
-   curl -X POST https://bookmark-bot.<your-subdomain>.workers.dev/register
+   npm run register
    ```
 
-   The response is Discord's own, so an error here tells you what it rejected.
+   This reads `DISCORD_TOKEN` and `DISCORD_APPLICATION_ID` from `.env` or
+   `.dev.vars` and calls Discord directly. Errors are Discord's own, so they
+   tell you exactly what was rejected. Use `npm run register -- --dry-run` to
+   see the payload without sending it.
 
 7. **Install the app** from the **Installation** page's install link. Adding it
    to a server enables it there; adding it to your account enables it in every
@@ -95,15 +98,14 @@ npm run deploy
 Secrets can also be set from the CLI with `npx wrangler secret put DISCORD_TOKEN`
 (and the other two) instead of via the dashboard.
 
-### Locking down `/register`
+### Why registration is not an HTTP endpoint
 
-`/register` is public by default, matching the original deployment. To require
-a token, set a secret and pass it as a bearer token:
-
-```bash
-npx wrangler secret put REGISTER_SECRET
-curl -X POST -H "Authorization: Bearer <secret>" https://<worker>/register
-```
+Registering commands spends the bot's token on a heavily rate-limited Discord
+endpoint. Exposing that as an unauthenticated route lets anyone on the internet
+make your Worker spend it — no data is at risk, but your app can be rate-limited
+by Discord and your Worker quota burned. It is a deploy-time task, so it runs
+from a developer machine instead and the Worker serves exactly one public route:
+Discord's signed interaction webhook.
 
 ## Local development
 
@@ -131,7 +133,7 @@ its actions are pinned to commit SHAs — bump them with Dependabot or Renovate.
 
 ```
 src/
-  index.ts        fetch handler: POST / (interactions) and POST /register
+  index.ts        fetch handler: POST / (Discord interactions)
   bot.ts          signature verification, then dispatch
   verify.ts       Ed25519 verification via WebCrypto
   interaction.ts  routes an interaction to a command or component
@@ -143,6 +145,8 @@ src/
   embed.ts        embed size limits and validation
   shared.ts       the button row attached to every bookmark
   env.ts          typed bindings
+scripts/
+  register.ts     registers commands with Discord (npm run register)
 ```
 
 ## Adding a command
@@ -164,7 +168,7 @@ src/
    ```
 
 2. Add it to the `commands` array in `src/commands/index.ts`.
-3. `npm run deploy`, then re-run the `/register` curl above.
+3. `npm run deploy`, then `npm run register`.
 
 Discord discards any interaction that is not acknowledged within **3 seconds**.
 A command that calls the Discord API (or anything else over the network) should

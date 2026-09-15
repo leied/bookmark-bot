@@ -104,7 +104,7 @@ export class CommandInput {
  * A slash command or message/user context-menu command.
  *
  * To add one: implement this interface in `src/commands/<name>.ts`, export it
- * from `src/commands/index.ts`, then re-run the `/register` endpoint.
+ * from `src/commands/index.ts`, then run `npm run register`.
  */
 export interface Command {
   /** Command name, e.g. `help` for `/help`. */
