@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# This project uses pnpm; a stray npm lockfile drifts from pnpm-lock.yaml
+package-lock.json
+
 # Build output
 dist/
 .wrangler/

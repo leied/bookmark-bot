@@ -21,7 +21,7 @@ Workers Builds watches the repo and deploys on every push. Set it up once:
    deploy from your machine first:
 
    ```bash
-   npm install
+   pnpm install
    npx wrangler login
    npx wrangler deploy
    ```
@@ -74,12 +74,12 @@ Workers Builds watches the repo and deploys on every push. Set it up once:
    change to a command's name, description, options, or contexts:
 
    ```bash
-   npm run register
+   pnpm run register
    ```
 
    This reads `DISCORD_TOKEN` and `DISCORD_APPLICATION_ID` from `.env` or
    `.dev.vars` and calls Discord directly. Errors are Discord's own, so they
-   tell you exactly what was rejected. Use `npm run register -- --dry-run` to
+   tell you exactly what was rejected. Use `pnpm run register --dry-run` to
    see the payload without sending it.
 
 7. **Install the app** from the **Installation** page's install link. Adding it
@@ -92,7 +92,7 @@ appear everywhere, so step 6 is not instant.
 ### Deploying by hand
 
 ```bash
-npm run deploy
+pnpm run deploy
 ```
 
 Secrets can also be set from the CLI with `npx wrangler secret put DISCORD_TOKEN`
@@ -111,7 +111,7 @@ Discord's signed interaction webhook.
 
 ```bash
 cp .dev.vars.example .dev.vars   # fill in your Discord credentials
-npm run dev                      # http://localhost:8787
+pnpm run dev                      # http://localhost:8787
 ```
 
 Discord must reach your machine to deliver interactions, so tunnel the local
@@ -119,8 +119,8 @@ server with something like `ngrok http 8787` and point the Interactions
 Endpoint URL at the tunnel while developing.
 
 ```bash
-npm test         # Vitest, running inside workerd
-npm run typecheck
+pnpm test         # Vitest, running inside workerd
+pnpm run typecheck
 ```
 
 ## Continuous integration
@@ -146,7 +146,7 @@ src/
   shared.ts       the button row attached to every bookmark
   env.ts          typed bindings
 scripts/
-  register.ts     registers commands with Discord (npm run register)
+  register.ts     registers commands with Discord (pnpm run register)
 ```
 
 ## Adding a command
@@ -168,7 +168,7 @@ scripts/
    ```
 
 2. Add it to the `commands` array in `src/commands/index.ts`.
-3. `npm run deploy`, then `npm run register`.
+3. `pnpm run deploy`, then `pnpm run register`.
 
 Discord discards any interaction that is not acknowledged within **3 seconds**.
 A command that calls the Discord API (or anything else over the network) should
