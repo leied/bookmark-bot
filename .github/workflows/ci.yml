@@ -4,7 +4,7 @@ name: CI
 
 on:
   push:
-    branches: [typescript]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

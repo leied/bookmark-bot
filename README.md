@@ -4,8 +4,9 @@ A serverless Discord bot running on Cloudflare Workers, written in TypeScript.
 Right click any message → **Apps** → **Bookmark**, and the bot DMs you a copy
 with buttons to recolour, delete, or jump back to the original.
 
-This is a TypeScript port of the original Rust/WebAssembly implementation
-(still on the `master` branch). It has no runtime dependencies: interaction
+This is a TypeScript port of the original Rust/WebAssembly implementation,
+which is preserved as the first commit in this repository's history. It has
+no runtime dependencies: interaction
 signatures are verified with the runtime's built-in Ed25519 WebCrypto support,
 and Discord is called with plain `fetch`.
 
@@ -45,7 +46,7 @@ Workers Builds watches the repo and deploys on every push. Set it up once:
 
    | Setting | Value |
    | --- | --- |
-   | Branch | `typescript` (the default is `main`) |
+   | Branch | `main` |
    | Root directory | `/` |
    | Build command | *(leave empty — there is no build step)* |
    | Deploy command | `npx wrangler deploy` |
