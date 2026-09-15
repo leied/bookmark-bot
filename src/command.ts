@@ -165,6 +165,44 @@ export const ALL_INSTALLS = [
   ApplicationIntegrationType.UserInstall,
 ];
 
+/**
+ * Reduces a command to just the fields this project sets, so a payload we
+ * built can be compared against one Discord returned. Discord adds its own
+ * fields (id, version, default_member_permissions, ...) and omits empty ones,
+ * neither of which mean the registration is out of date.
+ */
+function comparable(command: Partial<RegisteredCommand>): string {
+  return JSON.stringify({
+    name: command.name,
+    description: command.description ?? "",
+    type: command.type ?? ApplicationCommandType.ChatInput,
+    options: command.options ?? [],
+    contexts: [...(command.contexts ?? [])].sort(),
+    integration_types: [...(command.integration_types ?? [])].sort(),
+  });
+}
+
+/**
+ * True when Discord already holds exactly this registration, so a bulk
+ * overwrite would be a no-op. Lets `register` run on every deploy without
+ * spending the rate limit on an unchanged payload.
+ */
+export function registrationMatches(
+  desired: RegisteredCommand[],
+  existing: Partial<RegisteredCommand>[],
+): boolean {
+  const key = (c: Partial<RegisteredCommand>) => `${c.type ?? 1}:${c.name}`;
+  const sort = (a: Partial<RegisteredCommand>, b: Partial<RegisteredCommand>) =>
+    key(a).localeCompare(key(b));
+
+  if (desired.length !== existing.length) return false;
+
+  const ours = [...desired].sort(sort).map(comparable);
+  const theirs = [...existing].sort(sort).map(comparable);
+
+  return ours.every((value, index) => value === theirs[index]);
+}
+
 export function toRegisteredCommand(command: Command): RegisteredCommand {
   const type = command.type ?? ApplicationCommandType.ChatInput;
   return {

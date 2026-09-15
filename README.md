@@ -79,8 +79,14 @@ Workers Builds watches the repo and deploys on every push. Set it up once:
 
    This reads `DISCORD_TOKEN` and `DISCORD_APPLICATION_ID` from `.env` or
    `.dev.vars` and calls Discord directly. Errors are Discord's own, so they
-   tell you exactly what was rejected. Use `pnpm run register --dry-run` to
-   see the payload without sending it.
+   tell you exactly what was rejected.
+
+   | Flag | Effect |
+   | --- | --- |
+   | `--dry-run` | Print the payload without contacting Discord |
+   | `--force` | Overwrite even if Discord already holds this registration |
+
+   `pnpm run deploy` runs this for you, so you rarely need it on its own.
 
 7. **Install the app** from the **Installation** page's install link. Adding it
    to a server enables it there; adding it to your account enables it in every
@@ -89,11 +95,23 @@ Workers Builds watches the repo and deploys on every push. Set it up once:
 From then on, `git push` deploys. Global commands can take up to an hour to
 appear everywhere, so step 6 is not instant.
 
+**Workers Builds does not register commands.** It runs its own deploy command
+(`npx wrangler deploy`), not this project's `deploy` script, and it has no
+access to `DISCORD_TOKEN` unless you add it as a build variable. So after
+changing a command's name, description, options, or contexts, run
+`pnpm run register` once from your machine. Pushes that only change runtime
+behaviour need nothing.
+
 ### Deploying by hand
 
 ```bash
 pnpm run deploy
 ```
+
+This deploys and then registers commands. Registration first reads the current
+commands and skips the write when they already match, so running it on every
+deploy costs one cheap request rather than spending the bulk-overwrite rate
+limit each time.
 
 Secrets can also be set from the CLI with `npx wrangler secret put DISCORD_TOKEN`
 (and the other two) instead of via the dashboard.

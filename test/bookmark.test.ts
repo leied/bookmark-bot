@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { APIEmbed } from "discord-api-types/v10";
 
 import { defaultAvatarIndex, replaceLinksWithMarkdown } from "../src/commands/bookmark.js";
+import { registrationMatches, toRegisteredCommand } from "../src/command.js";
+import { commands } from "../src/commands/index.js";
 import {
   EMBED_LIMITS,
   MAX_EMBEDS_PER_MESSAGE,
@@ -126,5 +128,66 @@ describe("per-message embed budget", () => {
   it("leaves a set that already fits untouched", () => {
     const embeds = [big(100), big(200)];
     expect(fitToMessage(embeds)).toEqual(embeds);
+  });
+});
+
+describe("registrationMatches", () => {
+  const desired = commands.map(toRegisteredCommand);
+
+  /** What Discord echoes back: extra fields, and empty ones omitted. */
+  const asDiscordReturnsIt = (payload = desired) =>
+    payload.map((c, i) => ({
+      id: `90000000000000000${i}`,
+      application_id: "123",
+      version: `80000000000000000${i}`,
+      default_member_permissions: null,
+      nsfw: false,
+      ...c,
+      ...(c.options === undefined ? {} : { options: c.options }),
+    }));
+
+  it("skips the write when Discord already holds this registration", () => {
+    expect(registrationMatches(desired, asDiscordReturnsIt())).toBe(true);
+  });
+
+  it("ignores field order in contexts and integration_types", () => {
+    const shuffled = asDiscordReturnsIt().map((c) => ({
+      ...c,
+      contexts: [...c.contexts].reverse(),
+      integration_types: [...c.integration_types].reverse(),
+    }));
+    expect(registrationMatches(desired, shuffled)).toBe(true);
+  });
+
+  it("ignores the order commands come back in", () => {
+    expect(registrationMatches(desired, asDiscordReturnsIt().reverse())).toBe(true);
+  });
+
+  it("registers when a context was added", () => {
+    const narrower = asDiscordReturnsIt().map((c) => ({ ...c, contexts: [0] }));
+    expect(registrationMatches(desired, narrower)).toBe(false);
+  });
+
+  it("registers when an install type differs", () => {
+    const guildOnly = asDiscordReturnsIt().map((c) => ({ ...c, integration_types: [0] }));
+    expect(registrationMatches(desired, guildOnly)).toBe(false);
+  });
+
+  it("registers when a description changed", () => {
+    const stale = asDiscordReturnsIt().map((c) =>
+      c.name === "help" ? { ...c, description: "old text" } : c,
+    );
+    expect(registrationMatches(desired, stale)).toBe(false);
+  });
+
+  it("registers when a command was added or removed", () => {
+    expect(registrationMatches(desired, asDiscordReturnsIt().slice(1))).toBe(false);
+    expect(registrationMatches(desired, [])).toBe(false);
+  });
+
+  it("registers against a Discord response that omits contexts entirely", () => {
+    // How commands registered before contexts existed come back.
+    const legacy = asDiscordReturnsIt().map(({ contexts, integration_types, ...rest }) => rest);
+    expect(registrationMatches(desired, legacy)).toBe(false);
   });
 });
