@@ -14,7 +14,7 @@ import {
 } from "discord-api-types/v10";
 
 import type { Command, CommandInput } from "../command.js";
-import type { DiscordRest } from "../discord.js";
+import type { DiscordRest, DiscordUpload } from "../discord.js";
 import { EMBED_LIMITS, embedLength, fitToMessage, isValidEmbed, totalEmbedLength } from "../embed.js";
 
 /** Wraps bare links in markdown so they render as links inside an embed. */
@@ -70,14 +70,21 @@ function guildIconUrl(guild: APIGuild): string {
  * is user-installed, since the interaction still carries a guild_id the bot
  * has no access to.
  */
-function sourceFooter(guild: APIGuild | undefined, guildId: string | undefined): APIEmbedFooter {
+function sourceFooter(
+  guild: APIGuild | undefined,
+  guildId: string | undefined,
+  message: APIMessage,
+): APIEmbedFooter {
   if (guild) {
-    return { text: `${guild.name} (${guild.id})`, icon_url: guildIconUrl(guild) };
+    return { text: `From server: ${guild.name} (${guild.id})`, icon_url: guildIconUrl(guild) };
   }
   if (guildId) {
-    return { text: `Server (${guildId})`, icon_url: FALLBACK_ICON };
+    return { text: `From server: ${guildId}`, icon_url: FALLBACK_ICON };
   }
-  return { text: "Direct Message", icon_url: FALLBACK_ICON };
+  return {
+    text: `From direct message with ${message.author.username} (${message.author.id})`,
+    icon_url: authorAvatarUrl(message.author),
+  };
 }
 
 /**
@@ -118,7 +125,7 @@ function canAdd(embeds: APIEmbed[], index: number, addition: string): boolean {
   return total <= EMBED_LIMITS.total;
 }
 
-function appendAttachments(embeds: APIEmbed[], attachments: APIAttachment[]): void {
+function appendAttachmentLinks(embeds: APIEmbed[], attachments: APIAttachment[]): void {
   if (attachments.length === 0) return;
   if (embeds.length === 0) embeds.push({});
 
@@ -134,6 +141,42 @@ function appendAttachments(embeds: APIEmbed[], attachments: APIAttachment[]): vo
   } else {
     embeds.push({ description });
   }
+}
+
+interface AttachmentCopies {
+  uploads: DiscordUpload[];
+  failed: APIAttachment[];
+}
+
+/** Downloads Discord CDN attachments so the bookmark owns a durable copy. */
+async function copyAttachments(attachments: APIAttachment[]): Promise<AttachmentCopies> {
+  const results = await Promise.all(
+    attachments.map(async (attachment) => {
+      try {
+        const response = await fetch(attachment.url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        return {
+          attachment,
+          upload: {
+            data: await response.blob(),
+            filename: attachment.title ?? attachment.filename,
+            description: attachment.description,
+          } satisfies DiscordUpload,
+        };
+      } catch (error) {
+        console.log(
+          `[BOOKMARK] attachment ${attachment.id} could not be copied (${error}); preserving its link`,
+        );
+        return { attachment };
+      }
+    }),
+  );
+
+  return {
+    uploads: results.flatMap((result) => (result.upload ? [result.upload] : [])),
+    failed: results.flatMap((result) => (result.upload ? [] : [result.attachment])),
+  };
 }
 
 function appendStickers(embeds: APIEmbed[], stickers: APIStickerItem[]): void {
@@ -163,7 +206,9 @@ function buildEmbeds(message: APIMessage, footer: APIEmbedFooter): APIEmbed[] {
     if (embed.description) embed.description = replaceLinksWithMarkdown(embed.description);
   }
 
-  appendAttachments(embeds, message.attachments ?? []);
+  // Successfully copied attachments are sent as files. Anything still on the
+  // message here failed to download and is retained as a link instead.
+  appendAttachmentLinks(embeds, message.attachments ?? []);
   appendStickers(embeds, message.sticker_items ?? []);
 
   // A message can be empty of everything we copy (e.g. a poll); keep one embed
@@ -171,7 +216,7 @@ function buildEmbeds(message: APIMessage, footer: APIEmbedFooter): APIEmbed[] {
   if (embeds.length === 0) embeds.push({});
 
   embeds[0]!.author = {
-    name: `${message.author.username} (${message.author.id})`,
+    name: `Sent by ${message.author.username} (${message.author.id})`,
     icon_url: authorAvatarUrl(message.author),
   };
   embeds[0]!.footer = footer;
@@ -213,15 +258,26 @@ export const bookmark: Command = {
       return ephemeral("An error occured while reading the message you bookmarked");
     }
 
-    const guild = input.guildId ? await fetchGuild(rest, input.guildId) : undefined;
+    const [guild, attachmentCopies] = await Promise.all([
+      input.guildId ? fetchGuild(rest, input.guildId) : Promise.resolve(undefined),
+      copyAttachments(message.attachments ?? []),
+    ]);
 
     // DM and group-DM messages live under the @me pseudo-guild.
     const jumpUrl = `https://discord.com/channels/${input.guildId ?? "@me"}/${input.channelId}/${messageId}`;
 
-    const sent = await rest.post(`/channels/${dmChannel.id}/messages`, {
-      embeds: buildEmbeds(message, sourceFooter(guild, input.guildId)),
+    const outgoing = {
+      embeds: buildEmbeds(
+        { ...message, attachments: attachmentCopies.failed },
+        sourceFooter(guild, input.guildId, message),
+      ),
       components: input.defaultComponents(jumpUrl),
-    });
+    };
+    const messagePath = `/channels/${dmChannel.id}/messages`;
+    const sent =
+      attachmentCopies.uploads.length > 0
+        ? await rest.postWithFiles(messagePath, outgoing, attachmentCopies.uploads)
+        : await rest.post(messagePath, outgoing);
 
     if (sent.status === 403) {
       return ephemeral("Open your dms in this server to use this command");

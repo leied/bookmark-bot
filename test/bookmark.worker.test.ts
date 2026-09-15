@@ -25,7 +25,22 @@ function mockDiscord(routes: Record<string, Route>) {
     if (!route) throw new Error(`Unexpected request: ${key}`);
 
     // Recorded even when bodyless, so tests can assert a call did not happen.
-    sent[key] = init?.body ? JSON.parse(String(init.body)) : null;
+    if (init?.body instanceof FormData) {
+      const payload = JSON.parse(String(init.body.get("payload_json")));
+      const files: File[] = [];
+      for (let index = 0; ; index += 1) {
+        const file = init.body.get(`files[${index}]`);
+        if (!(file instanceof File)) break;
+        files.push(file);
+      }
+      sent[key] = { ...payload, _files: files };
+    } else {
+      sent[key] = init?.body ? JSON.parse(String(init.body)) : null;
+    }
+
+    if (route.body instanceof Blob) {
+      return new Response(route.body, { status: route.status ?? 200 });
+    }
     return Response.json(route.body ?? {}, { status: route.status ?? 200 });
   });
 
@@ -124,7 +139,10 @@ describe("/Bookmark", () => {
     // DM messages live under the @me pseudo-guild, not a guild id.
     const buttons = sent[SEND_DM].components[0].components;
     expect(buttons[2].url).toBe("https://discord.com/channels/@me/222/333");
-    expect(sent[SEND_DM].embeds[0].footer.text).toBe("Direct Message");
+    expect(sent[SEND_DM].embeds[0].footer.text).toBe("From direct message with author (7)");
+    expect(sent[SEND_DM].embeds[0].footer.icon_url).toBe(
+      "https://cdn.discordapp.com/avatars/7/abc.png",
+    );
     // There is no guild to read, so it must not be fetched.
     expect(sent[GET_GUILD]).toBeUndefined();
   });
@@ -138,7 +156,7 @@ describe("/Bookmark", () => {
 
     await dispatch(await sign(bookmarkInteraction()));
 
-    expect(sent[SEND_DM].embeds[0].footer.text).toBe("Server (111)");
+    expect(sent[SEND_DM].embeds[0].footer.text).toBe("From server: 111");
     expect(sent[SEND_DM].components[0].components[2].url).toBe(
       "https://discord.com/channels/111/222/333",
     );
@@ -154,9 +172,9 @@ describe("/Bookmark", () => {
 
     const embed = sent[SEND_DM].embeds[0];
     expect(embed.description).toBe("look at [https://example.com](https://example.com)");
-    expect(embed.author.name).toBe("author (7)");
+    expect(embed.author.name).toBe("Sent by author (7)");
     expect(embed.author.icon_url).toBe("https://cdn.discordapp.com/avatars/7/abc.png");
-    expect(embed.footer.text).toBe("My Server (111)");
+    expect(embed.footer.text).toBe("From server: My Server (111)");
     expect(embed.footer.icon_url).toBe("https://cdn.discordapp.com/icons/111/gicon.png");
 
     const buttons = sent[SEND_DM].components[0].components;
@@ -170,21 +188,62 @@ describe("/Bookmark", () => {
     expect(sent[FOLLOWUP].flags).toBeUndefined();
   });
 
-  it("appends attachments to the embed description", async () => {
+  it("forwards a copy of each attachment", async () => {
     const sign = await useSigningKey();
     env.DISCORD_TOKEN = "test-token";
-    const sent = mockDiscord(happyPathRoutes());
+    const sent = mockDiscord(
+      happyPathRoutes({
+        "GET /cat.png": { body: new Blob(["image bytes"], { type: "image/png" }) },
+      }),
+    );
 
     const message = {
       ...MESSAGE,
       content: "",
-      attachments: [{ filename: "cat.png", url: "https://cdn.test/cat.png" }],
+      attachments: [
+        {
+          id: "attachment-1",
+          filename: "cat.png",
+          description: "A cat",
+          url: "https://cdn.test/cat.png",
+        },
+      ],
     };
     await dispatch(await sign(bookmarkInteraction({}, message)));
 
-    expect(sent[SEND_DM].embeds[0].description).toBe(
-      "\n**Attachments:**\n> [cat.png](https://cdn.test/cat.png)",
+    expect(sent[SEND_DM].attachments).toEqual([
+      { id: 0, filename: "cat.png", description: "A cat" },
+    ]);
+    expect(sent[SEND_DM]._files).toHaveLength(1);
+    expect(sent[SEND_DM]._files[0].name).toBe("cat.png");
+    expect(await sent[SEND_DM]._files[0].text()).toBe("image bytes");
+    expect(sent[SEND_DM].embeds[0].description).toBeUndefined();
+  });
+
+  it("keeps an attachment link when its file cannot be downloaded", async () => {
+    const sign = await useSigningKey();
+    env.DISCORD_TOKEN = "test-token";
+    const sent = mockDiscord(
+      happyPathRoutes({ "GET /missing.pdf": { status: 404, body: {} } }),
     );
+
+    const message = {
+      ...MESSAGE,
+      content: "",
+      attachments: [
+        {
+          id: "attachment-2",
+          filename: "missing.pdf",
+          url: "https://cdn.test/missing.pdf",
+        },
+      ],
+    };
+    await dispatch(await sign(bookmarkInteraction({}, message)));
+
+    expect(sent[SEND_DM].embeds[0].description).toContain(
+      "[missing.pdf](https://cdn.test/missing.pdf)",
+    );
+    expect(sent[SEND_DM]._files).toBeUndefined();
   });
 
   it("renders a single sticker as an image embed", async () => {
@@ -210,7 +269,7 @@ describe("/Bookmark", () => {
     await dispatch(await sign(bookmarkInteraction({}, { ...MESSAGE, content: "" })));
 
     expect(sent[SEND_DM].embeds).toHaveLength(1);
-    expect(sent[SEND_DM].embeds[0].author.name).toBe("author (7)");
+    expect(sent[SEND_DM].embeds[0].author.name).toBe("Sent by author (7)");
   });
 
   it("gives a migrated author (discriminator 0) a real default avatar", async () => {
@@ -248,7 +307,7 @@ describe("/Bookmark", () => {
     const embeds = sent[SEND_DM].embeds;
     expect(embeds.length).toBeLessThanOrEqual(10);
     expect(totalLength(embeds)).toBeLessThanOrEqual(6000);
-    expect(embeds[0].author.name).toBe("author (7)");
+    expect(embeds[0].author.name).toBe("Sent by author (7)");
   });
 
   it("tells the user to open their DMs when Discord returns 403", async () => {

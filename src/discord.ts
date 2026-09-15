@@ -2,6 +2,12 @@ import { UpstreamError } from "./errors.js";
 
 export const DISCORD_API = "https://discord.com/api/v10";
 
+export interface DiscordUpload {
+  data: Blob;
+  filename: string;
+  description?: string;
+}
+
 /**
  * Minimal Discord REST client. Replaces the `reqwest` client built per-request
  * in the Rust version; callers inspect `Response.status` themselves so the
@@ -27,6 +33,41 @@ export class DiscordRest {
 
   post(path: string, body?: unknown): Promise<Response> {
     return this.request("POST", path, body);
+  }
+
+  /**
+   * Sends a multipart request using Discord's `payload_json` convention. Each
+   * attachment id must match the index in `files[n]`.
+   */
+  postWithFiles(
+    path: string,
+    body: Record<string, unknown>,
+    files: DiscordUpload[],
+  ): Promise<Response> {
+    const form = new FormData();
+    form.append(
+      "payload_json",
+      JSON.stringify({
+        ...body,
+        attachments: files.map((file, index) => ({
+          id: index,
+          filename: file.filename,
+          ...(file.description ? { description: file.description } : {}),
+        })),
+      }),
+    );
+
+    files.forEach((file, index) => {
+      form.append(`files[${index}]`, file.data, file.filename);
+    });
+
+    // FormData supplies the multipart boundary, so Content-Type must not be
+    // set manually here.
+    return fetch(`${DISCORD_API}${path}`, {
+      method: "POST",
+      headers: { Authorization: `Bot ${this.token}` },
+      body: form,
+    });
   }
 
   put(path: string, body?: unknown): Promise<Response> {
