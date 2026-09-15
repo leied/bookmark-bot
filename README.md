@@ -75,7 +75,12 @@ npm run typecheck
 
 `.github/workflows/deploy.yml` typechecks, tests, and deploys on every push to
 the `typescript` branch. Add a `CLOUDFLARE_API_TOKEN` repository secret with the
-**Edit Cloudflare Workers** permission to enable it.
+**Edit Cloudflare Workers** permission to enable it; scope the token to this
+Worker rather than the whole account.
+
+The workflow deploys with the wrangler version pinned in `package-lock.json`
+and pins each action to a commit SHA, so the token is never handed to a
+mutable third-party tag. Bump those pins with Dependabot or Renovate.
 
 ## Project layout
 
