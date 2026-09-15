@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bookmark-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-01-20",
+  "observability": {
+    "enabled": true
+  }
+
+  // Secrets (set with `wrangler secret put <NAME>`, never commit them):
+  //   DISCORD_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_APPLICATION_ID
+  //
+  // Optional KV namespace, if a command needs to persist state. Create it with
+  // `wrangler kv namespace create BOOKMARKS`, then uncomment and paste the id:
+  // "kv_namespaces": [{ "binding": "BOOKMARKS", "id": "<id>" }]
+}

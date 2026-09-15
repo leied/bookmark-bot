@@ -1,121 +1,135 @@
+# Bookmark Bot
 
-# About
+A serverless Discord bot running on Cloudflare Workers, written in TypeScript.
+Right click any message → **Apps** → **Bookmark**, and the bot DMs you a copy
+with buttons to recolour, delete, or jump back to the original.
 
-A pure-Rust serverless discord chatbot hosted on Cloudflare Workers. With a free account you have up to 100k requests per day. For storing state you can use the bundled [`workers-rs`](https://github.com/cloudflare/workers-rs) crate to access KV or Durable objects.
+This is a TypeScript port of the original Rust/WebAssembly implementation
+(still on the `master` branch). It has no runtime dependencies: interaction
+signatures are verified with the runtime's built-in Ed25519 WebCrypto support,
+and Discord is called with plain `fetch`.
 
-This template is designed for compiling Rust to WebAssembly and publishing the resulting worker to 
-Cloudflare's [edge infrastructure](https://www.cloudflare.com/network/).
+## Deploy
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Squidtoon99/bookmark-bot)
 
-## Setup
-
-1. Signup for a Cloudflare account, in the dashboard setup a subdomain (i.e `<mydomain>.workers.dev`)
-2. Setup a worker project named `bot` (i.e `bot.<mydomain>.workers.dev`) or pick your own name and update wrangler.toml
-3. Install [wrangler CLI](https://github.com/cloudflare/wrangler) with `cargo install wrangler` and authenticate with cloudflare via `wrangler config`
-4. Create a new discord app at https://discord.com/developers/applications and copy your token/application_id/public_key
-5. Pass those secrets to your bot with `wrangler secret put DISCORD_TOKEN`, `wrangler secret put DISCORD_PUBLIC_KEY`, `wrangler secret put DISCORD_APPLICATION_ID`
-6. [Add bot permissions](https://discord.com/developers/docs/tutorials/hosting-on-cloudflare-workers#adding-bot-permissions) and grab your Oauth url to invite the bot to your server
-7. Publish the demo app with `wrangler publish`. The template bot contains a single hello command with a dummy autocomplete argument.
-8. Put your bot domain `https://bot.<mydomain>.workers.dev` in the `INTERACTIONS ENDPOINT URL` in your discord app page from step 4
-9. After initial deployment and each time you add a new command on your bot you need to register it with the discord api. To do that simply `curl -X POST http://bot.<mydomain>.workers.dev/register`
-
-You should now be able to run the `/hello` command on discord 
-
-
-## Adding new commands
-
-To add a new command simply implement the `Command` trait. For example to add a ping command
-
-1. create a file src/commands/ping.rs
-
-``` rust
-use crate::interaction::{
-    InteractionApplicationCommandCallbackData, ApplicationCommandOption, ApplicationCommandOptionChoice, ApplicationCommandOptionType
-};
-use crate::error::InteractionError;
-use crate::command::{Command, CommandInput};
-
-use async_trait::async_trait;
-
-
-pub(crate) struct Ping {}
-
-#[async_trait(?Send)]
-impl Command for Ping {
-    async fn respond(&self, _input: &CommandInput) -> Result<InteractionApplicationCommandCallbackData, InteractionError> {
-        Ok(InteractionApplicationCommandCallbackData {
-            content: Some("Pong".to_string()),
-            choices: None,
-            embeds: None
-        })
-    }
-
-    fn name(&self) -> String{
-        "ping".into()
-    }
-
-    fn description(&self) -> String {
-        "Send a ping".into()
-    }
-
-    fn options(&self) -> Option<Vec<ApplicationCommandOption>> {
-        // add any arguments/choices here, more info at https://discord.com/developers/docs/interactions/application-commands#application-command-object-application-command-option-structure
-        None
-    }
-
-    async fn autocomplete(&self, _input: &CommandInput) -> Result<Option<InteractionApplicationCommandCallbackData>, InteractionError> {
-        None
-    }
-
-```
-2. add your new module in src/commands/mod.rs
-3. Register your command in  `init_commands` in src/command.rs 
-``` rust
-pub(crate) fn init_commands() -> Vec<Box<dyn Command + Sync>> {
-    let mut v : Vec<Box<dyn Command + Sync>> = Vec::new();
-    v.push(Box::new(commands::hello::Hello {}));
-    // Add this line
-    v.push(Box::new(commands::ping::Ping {}));
-    v
-}
-```
-4. publish your package with `wrangler publish`
-5. register your new command with discord with `curl -X POST http://bot.<mydomain>.workers.dev/register`
-
-You can store and access state using the `input` context object passed to the `respond` and `autocomplete` methods, for example:
-
-``` rust
-let my_val = input.kv_get("my_namespace", "my_key").await?; // the namespace must be first registered on cloudflare dashboard
-input.kv_put("my_namespace", "foo", "bar").await?;
-
-```
-
-## Local Dev 
-
-
-With `wrangler`, you can build, test, and deploy your Worker with the following commands: 
+Or from a clone:
 
 ```bash
-# compiles your project to WebAssembly and will warn of any issues
-wrangler build 
+npm install
+npx wrangler login
 
-# run your Worker in an ideal development workflow (with a local server, file watcher & more)
-wrangler dev
+# Create the Discord app at https://discord.com/developers/applications,
+# then paste each value when prompted:
+npx wrangler secret put DISCORD_TOKEN
+npx wrangler secret put DISCORD_PUBLIC_KEY
+npx wrangler secret put DISCORD_APPLICATION_ID
 
-# deploy your Worker globally to the Cloudflare network (update your wrangler.toml file for configuration)
-wrangler publish
+npm run deploy
 ```
 
-you can use `ngrok` to tunnel traffic into your local machine, more info [here](https://discord.com/developers/docs/tutorials/hosting-on-cloudflare-workers#setting-up-ngrok)
+Then finish the Discord side:
 
-## WebAssembly
+1. Set **Interactions Endpoint URL** on your application's General Information
+   page to `https://bookmark-bot.<your-subdomain>.workers.dev`. Discord verifies
+   it by sending a signed PING, which the worker answers with a PONG.
+2. Register the commands with Discord — needed after the first deploy and after
+   any change to a command's name, description, or options:
 
-`workers-rs` (the Rust SDK for Cloudflare Workers used in this template) is meant to be executed as 
-compiled WebAssembly, and as such so **must** all the code you write and depend upon. All crates and
-modules used in Rust-based Workers projects have to compile to the `wasm32-unknown-unknown` triple. 
+   ```bash
+   curl -X POST https://bookmark-bot.<your-subdomain>.workers.dev/register
+   ```
 
-Read more about this on the [`workers-rs` project README](https://github.com/cloudflare/workers-rs).
+3. Invite the bot using the OAuth2 URL from the developer portal with the
+   `bot` and `applications.commands` scopes.
+
+Global commands can take up to an hour to appear in every server.
+
+### Locking down `/register`
+
+`/register` is public by default, matching the original deployment. To require
+a token, set a secret and pass it as a bearer token:
+
+```bash
+npx wrangler secret put REGISTER_SECRET
+curl -X POST -H "Authorization: Bearer <secret>" https://<worker>/register
+```
+
+## Local development
+
+```bash
+cp .dev.vars.example .dev.vars   # fill in your Discord credentials
+npm run dev                      # http://localhost:8787
+```
+
+Discord must reach your machine to deliver interactions, so tunnel the local
+server with something like `ngrok http 8787` and point the Interactions
+Endpoint URL at the tunnel while developing.
+
+```bash
+npm test         # Vitest, running inside workerd
+npm run typecheck
+```
+
+## Continuous deployment
+
+`.github/workflows/deploy.yml` typechecks, tests, and deploys on every push to
+the `typescript` branch. Add a `CLOUDFLARE_API_TOKEN` repository secret with the
+**Edit Cloudflare Workers** permission to enable it.
+
+## Project layout
+
+```
+src/
+  index.ts        fetch handler: POST / (interactions) and POST /register
+  bot.ts          signature verification, then dispatch
+  verify.ts       Ed25519 verification via WebCrypto
+  interaction.ts  routes an interaction to a command or component
+  command.ts      Command interface + CommandInput helpers
+  component.ts    Component interface + ComponentInput helpers
+  commands/       help, bookmark  (registry in commands/index.ts)
+  components/     color, delete   (registry in components/index.ts)
+  discord.ts      minimal Discord REST client
+  embed.ts        embed size limits and validation
+  shared.ts       the button row attached to every bookmark
+  env.ts          typed bindings
+```
+
+## Adding a command
+
+1. Create `src/commands/ping.ts`:
+
+   ```ts
+   import { MessageFlags, type APIInteractionResponseCallbackData } from "discord-api-types/v10";
+   import type { Command, CommandInput } from "../command.js";
+
+   export const ping: Command = {
+     name: "ping",
+     description: "Send a ping",
+
+     async respond(input: CommandInput): Promise<APIInteractionResponseCallbackData> {
+       return { content: "Pong", flags: MessageFlags.Ephemeral };
+     },
+   };
+   ```
+
+2. Add it to the `commands` array in `src/commands/index.ts`.
+3. `npm run deploy`, then re-run the `/register` curl above.
+
+Commands receive a `CommandInput` with the interaction data plus helpers:
+`input.getOption(name)`, `input.uid()`, `input.rest()` for authenticated
+Discord API calls, and `input.kvGet` / `input.kvPut` for KV (bind a namespace
+in `wrangler.jsonc` first).
+
+To add a button or select menu, implement `Component` in `src/components/` and
+add it to the registry there. Components match on `custom_id` *prefix*, so they
+can carry state after their name — see `color`, which encodes the chosen colour
+and the jump URL.
 
 ## Credits
 
-based on [stateless-discord-bot](https://github.com/siketyan/stateless-discord-bot)
+Based on [stateless-discord-bot](https://github.com/siketyan/stateless-discord-bot).
+
+## License
+
+MIT — see [LICENSE.md](LICENSE.md).

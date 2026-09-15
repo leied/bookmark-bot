@@ -1,0 +1,10 @@
+# Copy to `.dev.vars` for local development with `npm run dev`.
+# In production these are secrets: `wrangler secret put <NAME>`.
+#
+# All three come from https://discord.com/developers/applications
+DISCORD_TOKEN="your-bot-token"
+DISCORD_PUBLIC_KEY="your-application-public-key"
+DISCORD_APPLICATION_ID="your-application-id"
+
+# Optional. When set, POST /register requires `Authorization: Bearer <value>`.
+# REGISTER_SECRET="a-long-random-string"
