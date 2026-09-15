@@ -24,7 +24,8 @@ function mockDiscord(routes: Record<string, Route>) {
     const route = routes[key];
     if (!route) throw new Error(`Unexpected request: ${key}`);
 
-    if (init?.body) sent[key] = JSON.parse(String(init.body));
+    // Recorded even when bodyless, so tests can assert a call did not happen.
+    sent[key] = init?.body ? JSON.parse(String(init.body)) : null;
     return Response.json(route.body ?? {}, { status: route.status ?? 200 });
   });
 
@@ -43,6 +44,7 @@ const MESSAGE = {
 };
 
 const SEND_DM = "POST /api/v10/channels/dm-1/messages";
+const GET_GUILD = "GET /api/v10/guilds/111";
 /** Where a deferred command's real answer lands (application_id "123", token "t"). */
 const FOLLOWUP = "PATCH /api/v10/webhooks/123/t/messages/@original";
 
@@ -92,7 +94,7 @@ async function dispatch(request: Request) {
 function happyPathRoutes(overrides: Record<string, Route> = {}) {
   return {
     "POST /api/v10/users/@me/channels": { body: { id: "dm-1" } },
-    "GET /api/v10/guilds/111": { body: { id: "111", name: "My Server", icon: "gicon" } },
+    [GET_GUILD]: { body: { id: "111", name: "My Server", icon: "gicon" } },
     [SEND_DM]: { body: { id: "sent" } },
     [FOLLOWUP]: { body: { id: "placeholder" } },
     ...overrides,
@@ -112,13 +114,35 @@ describe("/Bookmark", () => {
     expect(body.data.flags).toBe(MessageFlags.Ephemeral);
   });
 
-  it("refuses to run outside a guild", async () => {
+  it("bookmarks a message sent in a DM", async () => {
     const sign = await useSigningKey();
-    const sent = mockDiscord({ [FOLLOWUP]: { body: {} } });
+    env.DISCORD_TOKEN = "test-token";
+    const sent = mockDiscord(happyPathRoutes());
 
     await dispatch(await sign(bookmarkInteraction({ guild_id: undefined })));
 
-    expect(sent[FOLLOWUP].content).toBe("This command can only be used in a server");
+    // DM messages live under the @me pseudo-guild, not a guild id.
+    const buttons = sent[SEND_DM].components[0].components;
+    expect(buttons[2].url).toBe("https://discord.com/channels/@me/222/333");
+    expect(sent[SEND_DM].embeds[0].footer.text).toBe("Direct Message");
+    // There is no guild to read, so it must not be fetched.
+    expect(sent[GET_GUILD]).toBeUndefined();
+  });
+
+  it("still bookmarks when the bot cannot read the guild (user install)", async () => {
+    const sign = await useSigningKey();
+    env.DISCORD_TOKEN = "test-token";
+    // A user-installed app gets a guild_id for a server the bot is not in, so
+    // GET /guilds/{id} 404s. That must not sink the bookmark.
+    const sent = mockDiscord(happyPathRoutes({ [GET_GUILD]: { status: 404, body: {} } }));
+
+    await dispatch(await sign(bookmarkInteraction()));
+
+    expect(sent[SEND_DM].embeds[0].footer.text).toBe("Server (111)");
+    expect(sent[SEND_DM].components[0].components[2].url).toBe(
+      "https://discord.com/channels/111/222/333",
+    );
+    expect(sent[FOLLOWUP].components[0].components[0].label).toBe("Bookmarked");
   });
 
   it("DMs an embed with author, server footer, jump link and markdown links", async () => {
@@ -253,13 +277,13 @@ describe("/Bookmark", () => {
   it("replaces the placeholder even when the command throws", async () => {
     const sign = await useSigningKey();
     env.DISCORD_TOKEN = "test-token";
-    // The guild fetch throws UpstreamError, which used to leave the user on
-    // "thinking..." forever.
-    const sent = mockDiscord(
-      happyPathRoutes({ "GET /api/v10/guilds/111": { status: 500, body: {} } }),
-    );
+    const sent = mockDiscord({ [FOLLOWUP]: { body: {} } });
 
-    await dispatch(await sign(bookmarkInteraction()));
+    // No member and no user: uid() throws before any request is made. Such a
+    // failure used to leave the user on "thinking..." forever.
+    await dispatch(
+      await sign(bookmarkInteraction({ member: undefined, user: undefined })),
+    );
 
     expect(sent[FOLLOWUP].content).toBe("Something went wrong running that command.");
   });

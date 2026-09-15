@@ -196,6 +196,13 @@ describe("/register", () => {
     expect(payload.find((c: any) => c.name === "help").description).toBe(
       "Information about the bot",
     );
+
+    // Without these, commands inherit the app's configured contexts and are
+    // not offered in DMs. PrivateChannel (2) additionally needs UserInstall (1).
+    for (const command of payload) {
+      expect(command.contexts).toEqual([0, 1, 2]);
+      expect(command.integration_types).toEqual([0, 1]);
+    }
     vi.unstubAllGlobals();
   });
 

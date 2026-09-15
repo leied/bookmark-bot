@@ -1,5 +1,7 @@
 import {
   ApplicationCommandType,
+  ApplicationIntegrationType,
+  InteractionContextType,
   type APIApplicationCommandAutocompleteInteraction,
   type APIApplicationCommandInteraction,
   type APIApplicationCommandInteractionDataOption,
@@ -120,6 +122,17 @@ export interface Command {
    * the placeholder with its result.
    */
   readonly deferred?: boolean;
+  /**
+   * Where the command may be used: servers, the bot's own DM, and/or other
+   * people's DMs. Defaults to all three.
+   */
+  readonly contexts?: InteractionContextType[];
+  /**
+   * How the app must be installed for the command to appear. Defaults to both
+   * server installs and user installs; `PrivateChannel` above is only
+   * reachable through a user install.
+   */
+  readonly integrationTypes?: ApplicationIntegrationType[];
 
   respond(input: CommandInput): Promise<APIInteractionResponseCallbackData>;
 
@@ -135,7 +148,22 @@ export interface RegisteredCommand {
   description: string;
   options?: APIApplicationCommandOption[];
   type: ApplicationCommandType;
+  contexts: InteractionContextType[];
+  integration_types: ApplicationIntegrationType[];
 }
+
+/** Servers, the bot's DM, and other people's DMs. */
+export const ALL_CONTEXTS = [
+  InteractionContextType.Guild,
+  InteractionContextType.BotDM,
+  InteractionContextType.PrivateChannel,
+];
+
+/** Installed to a server, to a user account, or both. */
+export const ALL_INSTALLS = [
+  ApplicationIntegrationType.GuildInstall,
+  ApplicationIntegrationType.UserInstall,
+];
 
 export function toRegisteredCommand(command: Command): RegisteredCommand {
   const type = command.type ?? ApplicationCommandType.ChatInput;
@@ -145,5 +173,9 @@ export function toRegisteredCommand(command: Command): RegisteredCommand {
     description: type === ApplicationCommandType.ChatInput ? (command.description ?? "") : "",
     options: command.options,
     type,
+    // Sent explicitly: left off, a command inherits the app's configured
+    // contexts, which is how it ends up unavailable in DMs.
+    contexts: command.contexts ?? ALL_CONTEXTS,
+    integration_types: command.integrationTypes ?? ALL_INSTALLS,
   };
 }

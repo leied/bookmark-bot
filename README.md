@@ -4,6 +4,9 @@ A serverless Discord bot running on Cloudflare Workers, written in TypeScript.
 Right click any message → **Apps** → **Bookmark**, and the bot DMs you a copy
 with buttons to recolour, delete, or jump back to the original.
 
+Works in servers, in the bot's own DM, and — once the app is installed to your
+user account — in DMs with other people.
+
 This is a TypeScript port of the original Rust/WebAssembly implementation,
 which is preserved as the first commit in this repository's history. It has
 no runtime dependencies: interaction
@@ -61,18 +64,27 @@ Workers Builds watches the repo and deploys on every push. Set it up once:
    sending a signed PING, which the Worker answers with a PONG. Saving fails if
    the secrets from step 2 are missing or wrong.
 
-5. **Register the commands.** Needed after the first deploy, and after any
-   change to a command's name, description, or options:
+5. **Enable user installs.** On the application's **Installation** page, tick
+   **User Install** under *Installation Contexts*. Commands are registered for
+   `PRIVATE_CHANNEL` — DMs with other people — and Discord only allows that
+   context for user-installed apps, so `/register` in the next step fails
+   without it.
+
+6. **Register the commands.** Needed after the first deploy, and after any
+   change to a command's name, description, options, or contexts:
 
    ```bash
    curl -X POST https://bookmark-bot.<your-subdomain>.workers.dev/register
    ```
 
-6. **Invite the bot** with the OAuth2 URL from the developer portal, using the
-   `bot` and `applications.commands` scopes.
+   The response is Discord's own, so an error here tells you what it rejected.
+
+7. **Install the app** from the **Installation** page's install link. Adding it
+   to a server enables it there; adding it to your account enables it in every
+   DM you are in.
 
 From then on, `git push` deploys. Global commands can take up to an hour to
-appear in every server, so step 5 is not instant.
+appear everywhere, so step 6 is not instant.
 
 ### Deploying by hand
 
