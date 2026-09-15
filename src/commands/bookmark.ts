@@ -154,6 +154,9 @@ function buildEmbeds(message: APIMessage, guild: APIGuild): APIEmbed[] {
 export const bookmark: Command = {
   name: "Bookmark",
   type: ApplicationCommandType.Message,
+  // Opens a DM channel, reads the guild, and sends the bookmark: three
+  // sequential Discord calls, comfortably able to outlast the 3 second window.
+  deferred: true,
 
   async respond(input: CommandInput): Promise<APIInteractionResponseCallbackData> {
     if (!input.guildId) {

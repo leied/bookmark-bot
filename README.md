@@ -9,41 +9,78 @@ This is a TypeScript port of the original Rust/WebAssembly implementation
 signatures are verified with the runtime's built-in Ed25519 WebCrypto support,
 and Discord is called with plain `fetch`.
 
-## Deploy
+## Deploy with Cloudflare Workers Builds
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Squidtoon99/bookmark-bot)
+Workers Builds watches the repo and deploys on every push. Set it up once:
 
-Or from a clone:
+1. **Create the Worker.** Workers Builds deploys an existing Worker, so run one
+   deploy from your machine first:
 
-```bash
-npm install
-npx wrangler login
+   ```bash
+   npm install
+   npx wrangler login
+   npx wrangler deploy
+   ```
 
-# Create the Discord app at https://discord.com/developers/applications,
-# then paste each value when prompted:
-npx wrangler secret put DISCORD_TOKEN
-npx wrangler secret put DISCORD_PUBLIC_KEY
-npx wrangler secret put DISCORD_APPLICATION_ID
+   This creates `bookmark-bot` and prints its
+   `https://bookmark-bot.<your-subdomain>.workers.dev` URL.
 
-npm run deploy
-```
+2. **Add the runtime secrets.** In the dashboard, go to **Workers & Pages →
+   bookmark-bot → Settings → Variables & Secrets** and add three **Secret**
+   entries from your app at
+   [discord.com/developers/applications](https://discord.com/developers/applications):
 
-Then finish the Discord side:
+   | Name | Where to find it |
+   | --- | --- |
+   | `DISCORD_TOKEN` | Bot → Reset Token |
+   | `DISCORD_PUBLIC_KEY` | General Information → Public Key |
+   | `DISCORD_APPLICATION_ID` | General Information → Application ID |
 
-1. Set **Interactions Endpoint URL** on your application's General Information
-   page to `https://bookmark-bot.<your-subdomain>.workers.dev`. Discord verifies
-   it by sending a signed PING, which the worker answers with a PONG.
-2. Register the commands with Discord — needed after the first deploy and after
-   any change to a command's name, description, or options:
+   These must be **Variables & Secrets**, not build variables. Build variables
+   are not available at runtime, so setting them there leaves the bot unable to
+   verify a single interaction.
+
+3. **Connect the repo.** **Settings → Builds → Connect**, pick this repository,
+   and set:
+
+   | Setting | Value |
+   | --- | --- |
+   | Branch | `typescript` (the default is `main`) |
+   | Root directory | `/` |
+   | Build command | *(leave empty — there is no build step)* |
+   | Deploy command | `npx wrangler deploy` |
+
+   Dependencies are installed automatically from `package-lock.json`. Pushes to
+   any *other* branch build a preview version with `npx wrangler versions
+   upload` instead of deploying.
+
+4. **Point Discord at the Worker.** On the application's General Information
+   page, set **Interactions Endpoint URL** to
+   `https://bookmark-bot.<your-subdomain>.workers.dev`. Discord verifies it by
+   sending a signed PING, which the Worker answers with a PONG. Saving fails if
+   the secrets from step 2 are missing or wrong.
+
+5. **Register the commands.** Needed after the first deploy, and after any
+   change to a command's name, description, or options:
 
    ```bash
    curl -X POST https://bookmark-bot.<your-subdomain>.workers.dev/register
    ```
 
-3. Invite the bot using the OAuth2 URL from the developer portal with the
+6. **Invite the bot** with the OAuth2 URL from the developer portal, using the
    `bot` and `applications.commands` scopes.
 
-Global commands can take up to an hour to appear in every server.
+From then on, `git push` deploys. Global commands can take up to an hour to
+appear in every server, so step 5 is not instant.
+
+### Deploying by hand
+
+```bash
+npm run deploy
+```
+
+Secrets can also be set from the CLI with `npx wrangler secret put DISCORD_TOKEN`
+(and the other two) instead of via the dashboard.
 
 ### Locking down `/register`
 
@@ -71,16 +108,11 @@ npm test         # Vitest, running inside workerd
 npm run typecheck
 ```
 
-## Continuous deployment
+## Continuous integration
 
-`.github/workflows/deploy.yml` typechecks, tests, and deploys on every push to
-the `typescript` branch. Add a `CLOUDFLARE_API_TOKEN` repository secret with the
-**Edit Cloudflare Workers** permission to enable it; scope the token to this
-Worker rather than the whole account.
-
-The workflow deploys with the wrangler version pinned in `package-lock.json`
-and pins each action to a commit SHA, so the token is never handed to a
-mutable third-party tag. Bump those pins with Dependabot or Renovate.
+Deploys come from Workers Builds, so `.github/workflows/ci.yml` only typechecks
+and tests on pushes and pull requests. It holds no Cloudflare credentials, and
+its actions are pinned to commit SHAs — bump them with Dependabot or Renovate.
 
 ## Project layout
 
@@ -120,6 +152,28 @@ src/
 
 2. Add it to the `commands` array in `src/commands/index.ts`.
 3. `npm run deploy`, then re-run the `/register` curl above.
+
+Discord discards any interaction that is not acknowledged within **3 seconds**.
+A command that calls the Discord API (or anything else over the network) should
+set `deferred: true`, as `bookmark` does:
+
+```ts
+export const slow: Command = {
+  name: "slow",
+  description: "Does some real work",
+  deferred: true,
+  async respond(input) {
+    /* ... */
+  },
+};
+```
+
+The Worker then replies immediately with a "thinking..." placeholder, runs
+`respond` in the background via `waitUntil`, and edits the placeholder with the
+result — including a generic error message if `respond` throws, so the user is
+never left waiting forever. Ephemerality is decided by the deferral, so `flags`
+in the returned data is ignored on a deferred command. Leave `deferred` unset
+for commands that only assemble a reply, like `help`.
 
 Commands receive a `CommandInput` with the interaction data plus helpers:
 `input.getOption(name)`, `input.uid()`, `input.rest()` for authenticated

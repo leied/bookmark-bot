@@ -1,6 +1,6 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { InteractionType, MessageFlags } from "discord-api-types/v10";
+import { InteractionResponseType, InteractionType, MessageFlags } from "discord-api-types/v10";
 
 import worker from "../src/index.js";
 import { useSigningKey } from "./helpers.js";
@@ -43,6 +43,8 @@ const MESSAGE = {
 };
 
 const SEND_DM = "POST /api/v10/channels/dm-1/messages";
+/** Where a deferred command's real answer lands (application_id "123", token "t"). */
+const FOLLOWUP = "PATCH /api/v10/webhooks/123/t/messages/@original";
 
 function bookmarkInteraction(overrides: Record<string, unknown> = {}, message: unknown = MESSAGE) {
   return {
@@ -82,6 +84,7 @@ function totalLength(embeds: any[]): number {
 async function dispatch(request: Request) {
   const ctx = createExecutionContext();
   const response = await worker.fetch(request, env, ctx);
+  // Bookmark is deferred, so the real work runs in waitUntil; this waits for it.
   await waitOnExecutionContext(ctx);
   return response;
 }
@@ -91,19 +94,31 @@ function happyPathRoutes(overrides: Record<string, Route> = {}) {
     "POST /api/v10/users/@me/channels": { body: { id: "dm-1" } },
     "GET /api/v10/guilds/111": { body: { id: "111", name: "My Server", icon: "gicon" } },
     [SEND_DM]: { body: { id: "sent" } },
+    [FOLLOWUP]: { body: { id: "placeholder" } },
     ...overrides,
   };
 }
 
 describe("/Bookmark", () => {
+  it("acknowledges within Discord's 3 second window before doing any work", async () => {
+    const sign = await useSigningKey();
+    env.DISCORD_TOKEN = "test-token";
+    mockDiscord(happyPathRoutes());
+
+    const body = (await (await dispatch(await sign(bookmarkInteraction()))).json()) as any;
+
+    // A deferred ack, not the finished message: Discord shows "thinking...".
+    expect(body.type).toBe(InteractionResponseType.DeferredChannelMessageWithSource);
+    expect(body.data.flags).toBe(MessageFlags.Ephemeral);
+  });
+
   it("refuses to run outside a guild", async () => {
     const sign = await useSigningKey();
-    const body = (await (
-      await dispatch(await sign(bookmarkInteraction({ guild_id: undefined })))
-    ).json()) as any;
+    const sent = mockDiscord({ [FOLLOWUP]: { body: {} } });
 
-    expect(body.data.content).toBe("This command can only be used in a server");
-    expect(body.data.flags).toBe(MessageFlags.Ephemeral);
+    await dispatch(await sign(bookmarkInteraction({ guild_id: undefined })));
+
+    expect(sent[FOLLOWUP].content).toBe("This command can only be used in a server");
   });
 
   it("DMs an embed with author, server footer, jump link and markdown links", async () => {
@@ -111,7 +126,7 @@ describe("/Bookmark", () => {
     env.DISCORD_TOKEN = "test-token";
     const sent = mockDiscord(happyPathRoutes());
 
-    const body = (await (await dispatch(await sign(bookmarkInteraction()))).json()) as any;
+    await dispatch(await sign(bookmarkInteraction()));
 
     const embed = sent[SEND_DM].embeds[0];
     expect(embed.description).toBe("look at [https://example.com](https://example.com)");
@@ -124,10 +139,11 @@ describe("/Bookmark", () => {
     expect(buttons.map((b: any) => b.custom_id)).toEqual(["color", "delete", undefined]);
     expect(buttons[2].url).toBe("https://discord.com/channels/111/222/333");
 
-    // The user gets an ephemeral, already-disabled confirmation button.
-    expect(body.data.flags).toBe(MessageFlags.Ephemeral);
-    expect(body.data.components[0].components[0].label).toBe("Bookmarked");
-    expect(body.data.components[0].components[0].disabled).toBe(true);
+    // The placeholder is edited into the disabled confirmation button.
+    expect(sent[FOLLOWUP].components[0].components[0].label).toBe("Bookmarked");
+    expect(sent[FOLLOWUP].components[0].components[0].disabled).toBe(true);
+    // Ephemerality is fixed by the deferral, so the edit must not resend flags.
+    expect(sent[FOLLOWUP].flags).toBeUndefined();
   });
 
   it("appends attachments to the embed description", async () => {
@@ -159,9 +175,7 @@ describe("/Bookmark", () => {
     };
     await dispatch(await sign(bookmarkInteraction({}, message)));
 
-    expect(sent[SEND_DM].embeds[0].image.url).toBe(
-      "https://media.discordapp.net/stickers/900.png",
-    );
+    expect(sent[SEND_DM].embeds[0].image.url).toBe("https://media.discordapp.net/stickers/900.png");
   });
 
   it("still attributes a message with no copyable content", async () => {
@@ -210,27 +224,43 @@ describe("/Bookmark", () => {
     const embeds = sent[SEND_DM].embeds;
     expect(embeds.length).toBeLessThanOrEqual(10);
     expect(totalLength(embeds)).toBeLessThanOrEqual(6000);
-    // The attribution embed survives the trim.
     expect(embeds[0].author.name).toBe("author (7)");
   });
 
   it("tells the user to open their DMs when Discord returns 403", async () => {
     const sign = await useSigningKey();
     env.DISCORD_TOKEN = "test-token";
-    mockDiscord(happyPathRoutes({ [SEND_DM]: { status: 403, body: { message: "no" } } }));
+    const sent = mockDiscord(happyPathRoutes({ [SEND_DM]: { status: 403, body: { message: "no" } } }));
 
-    const body = (await (await dispatch(await sign(bookmarkInteraction()))).json()) as any;
+    await dispatch(await sign(bookmarkInteraction()));
 
-    expect(body.data.content).toBe("Open your dms in this server to use this command");
+    expect(sent[FOLLOWUP].content).toBe("Open your dms in this server to use this command");
   });
 
   it("reports when the bot cannot open a DM channel at all", async () => {
     const sign = await useSigningKey();
     env.DISCORD_TOKEN = "test-token";
-    mockDiscord({ "POST /api/v10/users/@me/channels": { status: 403, body: {} } });
+    const sent = mockDiscord({
+      "POST /api/v10/users/@me/channels": { status: 403, body: {} },
+      [FOLLOWUP]: { body: {} },
+    });
 
-    const body = (await (await dispatch(await sign(bookmarkInteraction()))).json()) as any;
+    await dispatch(await sign(bookmarkInteraction()));
 
-    expect(body.data.content).toBe("The bot is not authorized to create a dm channel with you");
+    expect(sent[FOLLOWUP].content).toBe("The bot is not authorized to create a dm channel with you");
+  });
+
+  it("replaces the placeholder even when the command throws", async () => {
+    const sign = await useSigningKey();
+    env.DISCORD_TOKEN = "test-token";
+    // The guild fetch throws UpstreamError, which used to leave the user on
+    // "thinking..." forever.
+    const sent = mockDiscord(
+      happyPathRoutes({ "GET /api/v10/guilds/111": { status: 500, body: {} } }),
+    );
+
+    await dispatch(await sign(bookmarkInteraction()));
+
+    expect(sent[FOLLOWUP].content).toBe("Something went wrong running that command.");
   });
 });

@@ -113,6 +113,13 @@ export interface Command {
   readonly type?: ApplicationCommandType;
   /** Arguments/choices, if any. */
   readonly options?: APIApplicationCommandOption[];
+  /**
+   * Set for commands that do network I/O. Discord drops any interaction that
+   * is not acknowledged within 3 seconds, so the worker replies immediately
+   * with a "thinking" placeholder, runs `respond` in the background, and edits
+   * the placeholder with its result.
+   */
+  readonly deferred?: boolean;
 
   respond(input: CommandInput): Promise<APIInteractionResponseCallbackData>;
 

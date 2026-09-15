@@ -46,3 +46,27 @@ export class DiscordRest {
     return (await response.json()) as T;
   }
 }
+
+/**
+ * Replaces the placeholder produced by a deferred interaction response.
+ *
+ * Interaction webhook endpoints are authenticated by the token in the URL, so
+ * this deliberately sends no bot token. `flags` is stripped because the
+ * ephemeral choice is fixed by the deferral and cannot be changed by an edit.
+ */
+export async function editOriginalInteractionResponse(
+  applicationId: string,
+  interactionToken: string,
+  data: Record<string, unknown>,
+): Promise<Response> {
+  const { flags: _flags, ...body } = data;
+
+  return fetch(
+    `${DISCORD_API}/webhooks/${applicationId}/${interactionToken}/messages/@original`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
